@@ -1,0 +1,45 @@
+#include "opencv2/opencv.hpp"
+
+using namespace std;
+using namespace cv;
+
+int main(int, char**)
+{
+	VideoCapture cap(0); // open the default camera
+	if (!cap.isOpened())  // check if we succeeded
+		return -1;
+
+	Mat edges;
+	Mat frame;
+	string savepath;
+	int useforsaving=1;
+	for (;;)
+	{
+		
+		cap >> frame; // get a new frame from camera
+		/*cvtColor(frame, edges, CV_BGR2GRAY);
+		GaussianBlur(edges, edges, Size(7, 7), 1.5, 1.5);
+		Canny(edges, edges, 0, 30, 3);*/
+		imshow("camera_out", frame);
+		if (waitKey(10) == 27)
+		{
+			cout << "press Esc";
+			break;
+		}
+		if (waitKey(10) == 's')
+		{
+			savepath = "E:/VisualStudioProjects/open_cam_test/open_cam_test/Me day/distance detection/far" + to_string(useforsaving) + ".jpg";
+			//convert << "E:/VisualStudioProjects/open_cam_test/open_cam_test/screen_cut" << useforsaving << ".jpg";
+			imwrite(savepath, frame);
+			useforsaving += 1;
+			cout << "screen cut";
+		}
+		if (useforsaving >= 160)
+		{
+			cout << endl << "imgs number is above 160";
+			break;
+		}
+	}
+	// the camera will be deinitialized automatically in VideoCapture destructor
+	return 0;
+}

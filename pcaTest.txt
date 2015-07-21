@@ -1,0 +1,213 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include <fstream>
+using namespace std;
+using namespace cv;
+// Function declarations
+void drawAxis(Mat&, Point, Point, Scalar, const float);
+double getOrientation(const vector<Point> &, Mat&);
+int dopca(Mat &src);
+void drawAxis(Mat& img, Point p, Point q, Scalar colour, const float scale = 0.2)
+{
+	double angle;
+	double hypotenuse;
+	angle = atan2((double)p.y - q.y, (double)p.x - q.x); // angle in radians
+	hypotenuse = sqrt((double)(p.y - q.y) * (p.y - q.y) + (p.x - q.x) * (p.x - q.x));
+	//    double degrees = angle * 180 / CV_PI; // convert radians to degrees (0-180 range)
+	//    cout << "Degrees: " << abs(degrees - 180) << endl; // angle in 0-360 degrees range
+	// Here we lengthen the arrow by a factor of scale
+	q.x = (int)(p.x - scale * hypotenuse * cos(angle));
+	q.y = (int)(p.y - scale * hypotenuse * sin(angle));
+	line(img, p, q, colour, 1, CV_AA);
+	// create the arrow hooks
+	p.x = (int)(q.x + 9 * cos(angle + CV_PI / 4));
+	p.y = (int)(q.y + 9 * sin(angle + CV_PI / 4));
+	line(img, p, q, colour, 1, CV_AA);
+	p.x = (int)(q.x + 9 * cos(angle - CV_PI / 4));
+	p.y = (int)(q.y + 9 * sin(angle - CV_PI / 4));
+	line(img, p, q, colour, 1, CV_AA);
+}
+double getOrientation(const vector<Point> &pts, Mat &img)
+{
+	//Construct a buffer used by the pca analysis
+	int sz = static_cast<int>(pts.size());
+	Mat data_pts = Mat(sz, 2, CV_64FC1);
+	for (int i = 0; i < data_pts.rows; ++i)
+	{
+		data_pts.at<double>(i, 0) = pts[i].x;
+		data_pts.at<double>(i, 1) = pts[i].y;
+	}
+	//Perform PCA analysis
+	PCA pca_analysis(data_pts, Mat(), CV_PCA_DATA_AS_ROW);
+	//Store the center of the object
+	Point cntr = Point(static_cast<int>(pca_analysis.mean.at<double>(0, 0)),
+		static_cast<int>(pca_analysis.mean.at<double>(0, 1)));
+	//Store the eigenvalues and eigenvectors
+	vector<Point2d> eigen_vecs(2);
+	vector<double> eigen_val(2);
+	for (int i = 0; i < 2; i++)
+	{
+		eigen_vecs[i] = Point2d(pca_analysis.eigenvectors.at<double>(i, 0),
+			pca_analysis.eigenvectors.at<double>(i, 1));
+		eigen_val[i] = pca_analysis.eigenvalues.at<double>(i, 0);
+	}
+	// Draw the principal components
+	circle(img, cntr, 3, Scalar(255, 0, 255), 2);
+	Point p1 = cntr + 0.02 * Point(static_cast<int>(eigen_vecs[0].x * eigen_val[0]), static_cast<int>(eigen_vecs[0].y * eigen_val[0]));
+	Point p2 = cntr - 0.02 * Point(static_cast<int>(eigen_vecs[1].x * eigen_val[1]), static_cast<int>(eigen_vecs[1].y * eigen_val[1]));
+	drawAxis(img, cntr, p1, Scalar(0, 255, 0), 1);
+	drawAxis(img, cntr, p2, Scalar(255, 255, 0), 5);
+	double angle = atan2(eigen_vecs[0].y, eigen_vecs[0].x)*180/3.14; // orientation in radians
+	return angle;
+}
+
+Ptr<BackgroundSubtractor> pMOG2; //MOG2 Background subtractor
+Mat fgMaskMOG2;
+Mat fgMaskMOG22;
+
+int main()
+{
+	ofstream outfile;
+	outfile.open("data_no_pixels.txt");
+	pMOG2 = new BackgroundSubtractorMOG2(); //MOG2 approach
+	Mat src = imread("E:/VisualStudioProjects/open_cam_test/open_cam_test/Me day/background/background1.jpg");
+	int total_img_no = 20;//total img number equals background + all other imgs
+	int img_no=0;
+	int correct_no = 0;
+	int quantity_pixel;
+	while (img_no < total_img_no)
+	{
+		pMOG2->operator()(src, fgMaskMOG2);
+
+		threshold(fgMaskMOG2, fgMaskMOG22, 50, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+
+		Size ksize = Size(5, 5);
+		Mat kernel = getStructuringElement(MORPH_RECT, ksize);
+		morphologyEx(fgMaskMOG22, fgMaskMOG22, MORPH_ERODE, kernel, Point(-1, -1), 1);
+		morphologyEx(fgMaskMOG22, fgMaskMOG22, MORPH_DILATE, kernel, Point(-1, -1), 4);
+		morphologyEx(fgMaskMOG22, fgMaskMOG22, MORPH_ERODE, kernel, Point(-1, -1), 4);
+
+		string PS_imgpath = "E:/VisualStudioProjects/open_cam_test/open_cam_test/Me day/correct/PS/PS_correct" + to_string(img_no + 1) + ".png";
+		Mat PS_src = imread(PS_imgpath);
+		imshow("PS", PS_src);
+		cvtColor(PS_src, PS_src, COLOR_RGB2GRAY);
+		int PS_quantity_pixel = countNonZero(PS_src);//quantity of pixels
+		cout << "PS number of pixels: " << PS_quantity_pixel << endl;
+
+		if (img_no != 0)
+		{
+			quantity_pixel = countNonZero(fgMaskMOG22);//quantity of pixels
+			cout << "number of pixels: " << quantity_pixel << endl;
+		}
+
+		if (img_no != 0)
+		{
+			outfile << "bg_subt=" << quantity_pixel << endl;
+		}
+		outfile << "PS=" << PS_quantity_pixel << " ";
+
+
+		//cvtColor(fgMaskMOG22, fgMaskMOG22, COLOR_GRAY2BGR);
+
+		/*//draw horizontal projection
+		Mat horizontal(fgMaskMOG22.cols, 1, CV_32S);
+		horizontal = Scalar::all(0);
+		Mat draw_horizontal(fgMaskMOG22.size(), CV_8UC3, Scalar(0, 0, 0));
+		for (int i = 0; i < fgMaskMOG22.cols; i++)
+		{
+			horizontal.at<int>(i, 0) = countNonZero(fgMaskMOG22(Rect(i,0,1,fgMaskMOG22.rows)));
+			//cout << i<<" horizontal " << horizontal.at<int>(i, 0) << endl;
+			line(draw_horizontal, Point(i, 0), Point(i, horizontal.at<int>(i, 0)), CV_RGB(0, 0, 255));
+		}
+		flip(draw_horizontal, draw_horizontal, 0);
+		imshow("drawHorizontal", draw_horizontal);*/
+
+		////draw vertical projection and find the neck
+		//Mat vertical(fgMaskMOG22.rows, 1, CV_32S);
+		//vertical = Scalar::all(0);
+		//Mat draw_vertical(fgMaskMOG22.size(), CV_8UC3, Scalar(0, 0, 0));
+		//int no_of_pixel_vertical;
+		//int t1=0;
+		//for (int i = 0; i < fgMaskMOG22.rows; i++)
+		//{
+		//	vertical.at<int>(i, 0) = countNonZero(fgMaskMOG22(Rect(0, i, fgMaskMOG22.cols, 1)));
+		//	//cout << i << " vertical " << vertical.at<int>(i, 0) << endl;
+		//	//if (vertical.at<int>(i, 0) < 10)vertical.at<int>(i, 0) = 0;
+		//	line(draw_vertical, Point(0, i), Point(vertical.at<int>(i, 0), i), CV_RGB(0, 0, 255));
+		//	if (vertical.at<int>(i, 0)>50) no_of_pixel_vertical = vertical.at<int>(i, 0);
+		//}
+		//for (int i = fgMaskMOG22.rows/2; i < fgMaskMOG22.rows; i++)
+		//{
+		//	if (no_of_pixel_vertical>vertical.at<int>(i, 0) && vertical.at<int>(i, 0)>50)
+		//	{
+		//		no_of_pixel_vertical = vertical.at<int>(i, 0);
+		//		t1 = i;
+		//	}
+		//}
+		//line(draw_vertical, Point(0, t1), Point(vertical.at<int>(t1, 0), t1), CV_RGB(255, 0, 0));
+		//cvtColor(fgMaskMOG22, fgMaskMOG22, COLOR_GRAY2BGR);
+		//line(fgMaskMOG22, Point(0, t1), Point(fgMaskMOG22.cols, t1), CV_RGB(255, 0, 0));
+		//imshow("drawVertical", draw_vertical);
+		//imshow("foreground with neck line", fgMaskMOG22);
+		imshow("foreground", fgMaskMOG22);
+		waitKey();
+		//int t=dopca(fgMaskMOG22);
+		//if (t == 1) correct_no += 1;
+
+		string imgpath = "E:/VisualStudioProjects/open_cam_test/open_cam_test/Me day/correct/PS/correct" + to_string(img_no+1) + ".jpg";
+		src = imread(imgpath);
+		img_no += 1;
+	}
+	//float correct_accuarcy = (float)correct_no / (float)(total_img_no);
+	//cout << "correct accuarcy is: " << correct_accuarcy*100 << "%" << endl;
+	//cout << "poor accuarcy is: " << (1-correct_accuarcy) * 100 << "%" << endl;
+	//system("pause");
+	outfile.close();
+}
+
+int dopca(Mat &src)
+{
+	int correct;
+	// Load image
+	
+	//Mat src = imread(argv[1]);
+	// Check if image is loaded successfully
+	if (!src.data || src.empty())
+	{
+		cout << "Problem loading image!!!" << endl;
+		return EXIT_FAILURE;
+	}
+	//imshow("src", src);
+	// Convert image to grayscale
+	Mat gray;
+	cvtColor(src, gray, COLOR_BGR2GRAY);
+	// Convert image to binary
+	Mat bw;
+	threshold(gray, bw, 50, 255, CV_THRESH_BINARY | CV_THRESH_OTSU);
+
+
+	// Find all the contours in the thresholded image
+	vector<Vec4i> hierarchy;
+	vector<vector<Point> > contours;
+	findContours(bw, contours, hierarchy, CV_RETR_LIST, CV_CHAIN_APPROX_NONE);
+	for (size_t i = 0; i < contours.size(); ++i)
+	{
+		// Calculate the area of each contour
+		double area = contourArea(contours[i]);
+		// Ignore contours that are too small or too large
+		if (area < 1e4 || 1e10 < area) continue;
+		// Draw each contour only for visualisation purposes
+		drawContours(src, contours, static_cast<int>(i), Scalar(0, 0, 255), 2, 8, hierarchy, 0);
+		// Find the orientation of each shape
+		double angle=getOrientation(contours[i], src);
+		if (angle<0) angle = 180 + angle;
+		cout << "the first principle angle is: " << angle << endl;
+		if (angle>75 && angle<105) correct = 1;//threshold
+		else correct=0;
+	}
+	//cout << "the correct is: " << correct << endl;
+	cout << "the poor is: " << 1-correct << endl;
+	//imshow("output", src);
+	//waitKey(0);
+	return correct;
+}
